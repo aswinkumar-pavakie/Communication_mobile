@@ -1,5 +1,12 @@
 import { apiClient, unwrap } from '@/lib/api-client';
-import type { ApiSuccessResponse, ChatMessage, Debate, DebatePosition, PaginatedResult } from '@/types/api';
+import type {
+  ApiSuccessResponse,
+  ChatMessage,
+  Debate,
+  DebatePosition,
+  DebateSessionHistoryItem,
+  PaginatedResult,
+} from '@/types/api';
 
 export async function fetchDebates(): Promise<PaginatedResult<Debate>> {
   const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<Debate>>>('/debates');
@@ -15,6 +22,8 @@ export interface DebateSessionSummary {
   id: string;
   status: string;
   overallScore: number | null;
+  /** Stored assessment JSON - present once the session is completed. */
+  feedback?: unknown;
 }
 
 export async function startDebateSession(
@@ -56,5 +65,14 @@ export interface DebateSessionDetail extends DebateSessionSummary {
 
 export async function fetchDebateSession(sessionId: string): Promise<DebateSessionDetail> {
   const response = await apiClient.get<ApiSuccessResponse<DebateSessionDetail>>(`/debates/sessions/${sessionId}`);
+  return unwrap(response);
+}
+
+/** The student's debates on one topic (newest first), including unfinished ones. */
+export async function fetchDebateSessions(debateId: string): Promise<PaginatedResult<DebateSessionHistoryItem>> {
+  const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<DebateSessionHistoryItem>>>(
+    `/debates/${debateId}/sessions`,
+    { params: { limit: 30 } },
+  );
   return unwrap(response);
 }

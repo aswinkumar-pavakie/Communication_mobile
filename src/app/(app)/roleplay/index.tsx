@@ -1,20 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { FlatList, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { fetchRoleplays } from '@/api/roleplay';
 import { ThemedText } from '@/components/themed-text';
-import { Card } from '@/components/ui/card';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
+import { IconTileCard } from '@/components/ui/icon-tile-card';
 import { LoadingState } from '@/components/ui/loading-state';
 import { ScreenContainer } from '@/components/ui/screen-container';
-import { Spacing } from '@/constants/theme';
+import { TileGrid } from '@/components/ui/tile-grid';
+import { humanize } from '@/lib/format';
+import { ROLEPLAY_SCENARIO_ICON } from '@/lib/practice-icons';
 
 export default function RoleplayListScreen() {
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['roleplays'],
-    queryFn: fetchRoleplays,
-  });
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['roleplays'], queryFn: fetchRoleplays });
 
   if (isLoading) {
     return (
@@ -33,28 +32,22 @@ export default function RoleplayListScreen() {
 
   return (
     <ScreenContainer scroll={false}>
-      <FlatList
-        data={data.items}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <ThemedText type="title" style={styles.headerTitle}>
-            Roleplay
+      <TileGrid
+        items={data.items}
+        emptyMessage="No roleplay scenarios available right now."
+        header={
+          <ThemedText type="small" themeColor="textSecondary" style={styles.intro}>
+            Chat through real workplace situations. Unfinished conversations are saved for later.
           </ThemedText>
         }
-        renderItem={({ item }) => (
-          <Card onPress={() => router.push(`/(app)/roleplay/${item.id}`)} style={styles.card}>
-            <ThemedText type="smallBold">{item.title}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {item.difficulty}
-            </ThemedText>
-            {item.description ? (
-              <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
-                {item.description}
-              </ThemedText>
-            ) : null}
-          </Card>
+        renderTile={(item) => (
+          <IconTileCard
+            onPress={() => router.push(`/(app)/roleplay/${item.id}`)}
+            icon={ROLEPLAY_SCENARIO_ICON[item.scenario] ?? { name: 'drama-masks', color: '#DB2777' }}
+            tags={[humanize(item.difficulty)]}
+            title={item.title}
+            subtitle={humanize(item.scenario)}
+          />
         )}
       />
     </ScreenContainer>
@@ -62,7 +55,5 @@ export default function RoleplayListScreen() {
 }
 
 const styles = StyleSheet.create({
-  list: { gap: Spacing.three, paddingBottom: Spacing.four },
-  headerTitle: { fontSize: 28, lineHeight: 34, marginBottom: Spacing.one },
-  card: { gap: Spacing.two },
+  intro: { marginBottom: 4 },
 });

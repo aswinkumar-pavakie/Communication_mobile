@@ -21,6 +21,7 @@ export async function submitWriting(id: string, content: string): Promise<Writin
 export async function fetchWritingSubmissions(id: string): Promise<PaginatedResult<WritingSubmission>> {
   const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<WritingSubmission>>>(
     `/writing/${id}/submissions`,
+    { params: { limit: 30 } },
   );
   return unwrap(response);
 }

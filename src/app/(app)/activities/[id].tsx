@@ -1,46 +1,108 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View, type ScrollView } from 'react-native';
 
-import { fetchActivity, submitActivityAttempt } from '@/api/activities';
+import { fetchActivity, fetchActivityAttempts, submitActivityAttempt } from '@/api/activities';
+import {
+  AttemptGroup,
+  CoachBubble,
+  HistoryHeader,
+  TypingBubble,
+  UserBubble,
+  useFoldState,
+} from '@/components/activity-chat';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
 import { LoadingState } from '@/components/ui/loading-state';
-import { ScoreBadge } from '@/components/ui/score-badge';
 import { ScreenContainer } from '@/components/ui/screen-container';
 import { TextField } from '@/components/ui/text-field';
 import { VoiceRecorderPanel } from '@/components/voice-recorder-panel';
 import { Spacing } from '@/constants/theme';
-import type { AttemptResult } from '@/types/api';
+import type { AttemptHistoryItem, AttemptResult, PaginatedResult } from '@/types/api';
 
-const VOICE_ELIGIBLE_TYPES = new Set(['SPEAKING', 'INTERVIEW', 'ROLEPLAY']);
+const VOICE_ELIGIBLE_TYPES = new Set(['SPEAKING', 'INTERVIEW', 'ROLEPLAY', 'DEBATE']);
+
+/** What's in flight right now - shown as a user bubble + "reviewing" bubble until the score lands. */
+type Pending = { kind: 'text'; text: string } | { kind: 'voice' };
 
 export default function ActivityDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const scrollRef = useRef<ScrollView>(null);
+
   const [mode, setMode] = useState<'text' | 'voice'>('text');
   const [responseText, setResponseText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [result, setResult] = useState<AttemptResult | null>(null);
+  /** Spoken-feedback files exist only on this device for this session, keyed by attempt id. */
+  const [feedbackAudio, setFeedbackAudio] = useState<Record<string, string>>({});
+  /** Voice attempts made this session - catches spoken answers saved without a stored recording. */
+  const [spokenIds, setSpokenIds] = useState<Record<string, true>>({});
+
+  const attemptsKey = ['activity-attempts', id];
 
   const { data: activity, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['activity', id],
     queryFn: () => fetchActivity(id),
   });
 
+  const attemptsQuery = useQuery({
+    queryKey: attemptsKey,
+    queryFn: () => fetchActivityAttempts(id),
+  });
+
+  // API returns newest first; a chat reads oldest -> newest.
+  const thread = useMemo(() => [...(attemptsQuery.data?.items ?? [])].reverse(), [attemptsQuery.data]);
+  // Only the newest exchange starts open; older ones fold away like past chats.
+  const fold = useFoldState(
+    thread.map((t) => t.id),
+    thread.at(-1)?.id,
+  );
+
+  function scrollToEnd() {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+  }
+
+  function handleResult(result: AttemptResult, extra: { feedbackAudioUri?: string; spoken?: boolean } = {}) {
+    const item: AttemptHistoryItem = { ...result.attempt, assessment: result.assessment };
+    queryClient.setQueryData<PaginatedResult<AttemptHistoryItem>>(attemptsKey, (old) =>
+      old
+        ? {
+            ...old,
+            items: [item, ...old.items.filter((i) => i.id !== item.id)],
+            meta: { ...old.meta, total: old.meta.total + 1 },
+          }
+        : old,
+    );
+    void queryClient.invalidateQueries({ queryKey: attemptsKey });
+    // A scored attempt moves progress, streak and recommendations - refresh those screens too.
+    for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+
+    const feedbackAudioUri = extra.feedbackAudioUri;
+    if (feedbackAudioUri) setFeedbackAudio((prev) => ({ ...prev, [item.id]: feedbackAudioUri }));
+    if (extra.spoken) setSpokenIds((prev) => ({ ...prev, [item.id]: true }));
+    fold.reset(); // fold older attempts so the new exchange is the one in focus
+    setPending(null);
+    scrollToEnd();
+  }
+
   async function handleTextSubmit() {
+    const text = responseText.trim();
     setSubmitError(null);
-    setIsSubmitting(true);
+    setPending({ kind: 'text', text });
+    setResponseText('');
+    scrollToEnd();
     try {
-      const attemptResult = await submitActivityAttempt(id, responseText.trim());
-      setResult(attemptResult);
+      handleResult(await submitActivityAttempt(id, text));
     } catch (err) {
       setSubmitError(apiErrorMessage(err));
-    } finally {
-      setIsSubmitting(false);
+      setResponseText(text); // give the answer back so nothing typed is lost
+      setPending(null);
     }
   }
 
@@ -63,41 +125,82 @@ export default function ActivityDetailScreen() {
   const supportsVoice = VOICE_ELIGIBLE_TYPES.has(activity.type);
 
   return (
-    <ScreenContainer>
+    <ScreenContainer scrollRef={scrollRef}>
       <ThemedText type="title" style={styles.title}>
         {activity.title}
       </ThemedText>
       <ThemedText themeColor="textSecondary">{activity.description}</ThemedText>
-      {activity.instructions ? (
-        <Card>
-          <ThemedText type="smallBold">Instructions</ThemedText>
-          <ThemedText type="small">{activity.instructions}</ThemedText>
-        </Card>
+
+      <CoachBubble>
+        <ThemedText type="smallBold">Your task</ThemedText>
+        <ThemedText type="small">{activity.instructions || activity.description}</ThemedText>
+      </CoachBubble>
+
+      <HistoryHeader
+        title="Your answers"
+        count={thread.length}
+        allExpanded={fold.allExpanded}
+        onToggleAll={fold.toggleAll}
+      />
+
+      {attemptsQuery.isError ? (
+        <Pressable onPress={() => attemptsQuery.refetch()}>
+          <ThemedText type="small" themeColor="danger">
+            Couldn&apos;t load your previous answers. Tap to retry.
+          </ThemedText>
+        </Pressable>
       ) : null}
 
-      {result ? (
-        <ResultCard result={result} />
-      ) : (
-        <>
-          {supportsVoice ? (
-            <View style={styles.modeSwitch}>
-              <Button
-                label="Type answer"
-                variant={mode === 'text' ? 'primary' : 'secondary'}
-                onPress={() => setMode('text')}
-                style={styles.modeButton}
-              />
-              <Button
-                label="Record answer"
-                variant={mode === 'voice' ? 'primary' : 'secondary'}
-                onPress={() => setMode('voice')}
-                style={styles.modeButton}
-              />
-            </View>
-          ) : null}
+      {thread.map((item, index) => (
+        <AttemptGroup
+          key={item.id}
+          number={index + 1}
+          item={item}
+          expanded={fold.isExpanded(item.id)}
+          onToggle={() => fold.toggle(item.id)}
+          spoken={Boolean(item.audioUrl) || Boolean(spokenIds[item.id])}
+          feedbackAudioUri={feedbackAudio[item.id]}
+        />
+      ))}
 
-          {mode === 'text' ? (
-            <Card>
+      {pending ? (
+        <View style={styles.pending}>
+          {pending.kind === 'text' ? (
+            <UserBubble text={pending.text} />
+          ) : (
+            <UserBubble text="Transcribing your recording..." spoken pending />
+          )}
+          <TypingBubble label="Coach is reviewing your answer..." />
+        </View>
+      ) : null}
+
+      <View style={styles.composer}>
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          {thread.length > 0 ? 'Answer again to improve your score' : 'Your answer'}
+        </ThemedText>
+
+        {supportsVoice ? (
+          <View style={styles.modeSwitch}>
+            <Button
+              label="Type answer"
+              variant={mode === 'text' ? 'primary' : 'secondary'}
+              onPress={() => setMode('text')}
+              style={styles.modeButton}
+              disabled={pending !== null}
+            />
+            <Button
+              label="Record answer"
+              variant={mode === 'voice' ? 'primary' : 'secondary'}
+              onPress={() => setMode('voice')}
+              style={styles.modeButton}
+              disabled={pending !== null}
+            />
+          </View>
+        ) : null}
+
+        <Card>
+          {mode === 'text' || !supportsVoice ? (
+            <>
               <TextField
                 label="Your response"
                 value={responseText}
@@ -106,6 +209,7 @@ export default function ActivityDetailScreen() {
                 numberOfLines={6}
                 style={styles.textArea}
                 placeholder="Write your response here..."
+                editable={pending === null}
               />
               {submitError ? (
                 <ThemedText themeColor="danger" type="small">
@@ -113,76 +217,34 @@ export default function ActivityDetailScreen() {
                 </ThemedText>
               ) : null}
               <Button
-                label="Submit"
+                label="Send"
                 onPress={handleTextSubmit}
-                loading={isSubmitting}
-                disabled={responseText.trim().length === 0}
+                loading={pending?.kind === 'text'}
+                disabled={responseText.trim().length === 0 || pending !== null}
               />
-            </Card>
+            </>
           ) : (
-            <VoiceRecorderPanel activityId={activity.id} onResult={setResult} />
+            <VoiceRecorderPanel
+              activityId={activity.id}
+              onSubmitting={() => {
+                setPending({ kind: 'voice' });
+                scrollToEnd();
+              }}
+              onResult={(result, feedbackAudioUri) => handleResult(result, { feedbackAudioUri, spoken: true })}
+              onError={() => setPending(null)}
+            />
           )}
-        </>
-      )}
-    </ScreenContainer>
-  );
-}
-
-function ResultCard({ result }: { result: AttemptResult }) {
-  return (
-    <Card style={styles.resultCard}>
-      <View style={styles.resultHeader}>
-        <ScoreBadge score={result.assessment.overallScore} size="large" />
-        <ThemedText type="smallBold" style={styles.flex}>
-          {result.assessment.feedback}
-        </ThemedText>
+        </Card>
       </View>
-
-      {result.assessment.strengths.length > 0 ? (
-        <View style={styles.section}>
-          <ThemedText type="smallBold" themeColor="success">
-            Strengths
-          </ThemedText>
-          {result.assessment.strengths.map((s, i) => (
-            <ThemedText key={i} type="small">
-              • {s}
-            </ThemedText>
-          ))}
-        </View>
-      ) : null}
-
-      {result.assessment.weaknesses.length > 0 ? (
-        <View style={styles.section}>
-          <ThemedText type="smallBold" themeColor="warning">
-            Areas to improve
-          </ThemedText>
-          {result.assessment.weaknesses.map((w, i) => (
-            <ThemedText key={i} type="small">
-              • {w}
-            </ThemedText>
-          ))}
-        </View>
-      ) : null}
-
-      {result.assessment.suggestedResponse ? (
-        <View style={styles.section}>
-          <ThemedText type="smallBold">Suggested response</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {result.assessment.suggestedResponse}
-          </ThemedText>
-        </View>
-      ) : null}
-    </Card>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
   title: { fontSize: 26, lineHeight: 32 },
+  pending: { gap: Spacing.three },
+  composer: { gap: Spacing.two },
   modeSwitch: { flexDirection: 'row', gap: Spacing.two },
   modeButton: { flex: 1 },
   textArea: { minHeight: 120, textAlignVertical: 'top' },
-  resultCard: { gap: Spacing.three },
-  resultHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  section: { gap: Spacing.one },
-  flex: { flex: 1 },
 });

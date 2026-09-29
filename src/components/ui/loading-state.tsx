@@ -7,7 +7,7 @@ export function LoadingState({ label = 'Loading...' }: { label?: string }) {
   const theme = useTheme();
   return (
     <View style={styles.container}>
-      <ActivityIndicator color={theme.primary} />
+      <ActivityIndicator size="large" color={theme.primary} />
       <ThemedText themeColor="textSecondary" type="small">
         {label}
       </ThemedText>
@@ -16,5 +16,5 @@ export function LoadingState({ label = 'Loading...' }: { label?: string }) {
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 40 },
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 48 },
 });

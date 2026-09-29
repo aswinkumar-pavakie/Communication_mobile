@@ -1,20 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { FlatList, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { fetchWritingActivities } from '@/api/writing';
 import { ThemedText } from '@/components/themed-text';
-import { Card } from '@/components/ui/card';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
+import { IconTileCard } from '@/components/ui/icon-tile-card';
 import { LoadingState } from '@/components/ui/loading-state';
 import { ScreenContainer } from '@/components/ui/screen-container';
-import { Spacing } from '@/constants/theme';
+import { TileGrid } from '@/components/ui/tile-grid';
+import { humanize } from '@/lib/format';
+import { WRITING_TYPE_ICON } from '@/lib/practice-icons';
 
 export default function WritingListScreen() {
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['writing-activities'],
-    queryFn: fetchWritingActivities,
-  });
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['writing-activities'], queryFn: fetchWritingActivities });
 
   if (isLoading) {
     return (
@@ -33,28 +32,22 @@ export default function WritingListScreen() {
 
   return (
     <ScreenContainer scroll={false}>
-      <FlatList
-        data={data.items}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <ThemedText type="title" style={styles.headerTitle}>
-            Writing
+      <TileGrid
+        items={data.items}
+        emptyMessage="No writing activities available right now."
+        header={
+          <ThemedText type="small" themeColor="textSecondary" style={styles.intro}>
+            Write professional messages and improve them draft by draft.
           </ThemedText>
         }
-        renderItem={({ item }) => (
-          <Card onPress={() => router.push(`/(app)/writing/${item.id}`)} style={styles.card}>
-            <ThemedText type="smallBold">{item.title}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {item.type.replace(/_/g, ' ')} • {item.difficulty}
-            </ThemedText>
-            {item.description ? (
-              <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
-                {item.description}
-              </ThemedText>
-            ) : null}
-          </Card>
+        renderTile={(item) => (
+          <IconTileCard
+            onPress={() => router.push(`/(app)/writing/${item.id}`)}
+            icon={WRITING_TYPE_ICON[item.type] ?? { name: 'pencil-outline', color: '#8B5CF6' }}
+            tags={[humanize(item.difficulty)]}
+            title={item.title}
+            subtitle={humanize(item.type)}
+          />
         )}
       />
     </ScreenContainer>
@@ -62,7 +55,5 @@ export default function WritingListScreen() {
 }
 
 const styles = StyleSheet.create({
-  list: { gap: Spacing.three, paddingBottom: Spacing.four },
-  headerTitle: { fontSize: 28, lineHeight: 34, marginBottom: Spacing.one },
-  card: { gap: Spacing.two },
+  intro: { marginBottom: 4 },
 });

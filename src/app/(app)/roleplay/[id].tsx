@@ -1,39 +1,59 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { completeRoleplaySession, fetchRoleplay, sendRoleplayMessage, startRoleplaySession } from '@/api/roleplay';
+import {
+  completeRoleplaySession,
+  fetchRoleplay,
+  fetchRoleplaySessions,
+  sendRoleplayMessage,
+  startRoleplaySession,
+} from '@/api/roleplay';
+import { FeedbackBubble, formatWhen, parseAssessmentFeedback } from '@/components/activity-chat';
+import { ActiveChat, ChatThread, SessionHistoryList } from '@/components/chat-practice';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
-import { ChatBubble } from '@/components/ui/chat-bubble';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
 import { LoadingState } from '@/components/ui/loading-state';
 import { ScoreBadge } from '@/components/ui/score-badge';
-import { TextField } from '@/components/ui/text-field';
-import { VoiceToTextButton } from '@/components/voice-to-text-button';
-import { useTheme } from '@/hooks/use-theme';
-import type { ChatMessage } from '@/types/api';
+import { ScreenContainer } from '@/components/ui/screen-container';
+import { Spacing } from '@/constants/theme';
+import type { AssessmentFeedback, ChatMessage, ChatSessionHistoryItem } from '@/types/api';
 
 type Phase = 'intro' | 'active' | 'completed';
 
+const AI_ICON = 'account-tie-outline';
+
 export default function RoleplaySessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const theme = useTheme();
-  const scrollRef = useRef<ScrollView>(null);
+  const queryClient = useQueryClient();
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [banner, setBanner] = useState<string | undefined>();
   const [draft, setDraft] = useState('');
   const [isBusy, setIsBusy] = useState(false);
+  const [isReplying, setIsReplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [finalScore, setFinalScore] = useState<number | null>(null);
+  const [result, setResult] = useState<{ score: number | null; feedback: AssessmentFeedback | null } | null>(null);
+
+  const sessionsKey = ['roleplay-sessions', id];
 
   const { data: roleplay, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['roleplay', id],
     queryFn: () => fetchRoleplay(id),
   });
+  const sessionsQuery = useQuery({ queryKey: sessionsKey, queryFn: () => fetchRoleplaySessions(id) });
+  const sessions = sessionsQuery.data?.items ?? [];
+  const unfinished = sessions.find((s) => s.status === 'STARTED');
+
+  function backToIntro() {
+    void queryClient.invalidateQueries({ queryKey: sessionsKey });
+    setPhase('intro');
+    setError(null);
+  }
 
   async function handleStart() {
     setError(null);
@@ -42,12 +62,22 @@ export default function RoleplaySessionScreen() {
       const { session, message } = await startRoleplaySession(id);
       setSessionId(session.id);
       setMessages([message]);
+      setBanner(undefined);
       setPhase('active');
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
+  }
+
+  function handleContinue(session: ChatSessionHistoryItem) {
+    setSessionId(session.id);
+    setMessages(session.messages);
+    setBanner(`Continuing your conversation from ${formatWhen(session.createdAt)}`);
+    setError(null);
+    setPhase('active');
   }
 
   async function handleSend() {
@@ -61,15 +91,16 @@ export default function RoleplaySessionScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setDraft('');
     setIsBusy(true);
+    setIsReplying(true);
     setError(null);
     try {
       const reply = await sendRoleplayMessage(id, sessionId, userMessage.content);
       setMessages((prev) => [...prev, reply]);
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
+      setIsReplying(false);
     }
   }
 
@@ -79,8 +110,15 @@ export default function RoleplaySessionScreen() {
     setError(null);
     try {
       const summary = await completeRoleplaySession(id, sessionId);
-      setFinalScore(summary.overallScore);
+      setResult({
+        score: summary.overallScore,
+        feedback: parseAssessmentFeedback(summary.feedback, summary.overallScore),
+      });
       setPhase('completed');
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
+      for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -91,82 +129,76 @@ export default function RoleplaySessionScreen() {
   if (isLoading) return <LoadingState label="Loading scenario..." />;
   if (isError || !roleplay) return <ErrorState message={apiErrorMessage(loadError)} onRetry={refetch} />;
 
-  if (phase === 'intro') {
+  if (phase === 'active') {
     return (
-      <View style={styles.introContainer}>
-        <ThemedText type="title" style={styles.title}>
-          {roleplay.title}
-        </ThemedText>
-        <ThemedText themeColor="textSecondary">{roleplay.description}</ThemedText>
-        {error ? (
-          <ThemedText themeColor="danger" type="small">
-            {error}
-          </ThemedText>
-        ) : null}
-        <Button label="Start scenario" onPress={handleStart} loading={isBusy} />
-      </View>
+      <ActiveChat
+        messages={messages}
+        aiIcon={AI_ICON}
+        draft={draft}
+        onDraftChange={setDraft}
+        isBusy={isBusy}
+        isReplying={isReplying}
+        error={error}
+        placeholder="Type your response, or use the mic above..."
+        onSend={handleSend}
+        onFinish={handleFinish}
+        banner={banner}
+      />
     );
   }
 
   if (phase === 'completed') {
     return (
-      <View style={styles.introContainer}>
-        <ScoreBadge score={finalScore ?? 0} size="large" />
-        <ThemedText type="smallBold">Session complete!</ThemedText>
-        <ThemedText themeColor="textSecondary" style={styles.centerText}>
-          Check your Progress tab to see your updated skill scores.
+      <ScreenContainer>
+        <View style={styles.center}>
+          <ScoreBadge score={result?.score ?? 0} size="large" />
+          <ThemedText type="smallBold">Session complete!</ThemedText>
+        </View>
+        {result?.feedback ? <FeedbackBubble assessment={result.feedback} title="Conversation feedback" /> : null}
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          Your conversation
         </ThemedText>
-      </View>
+        <ChatThread messages={messages} aiIcon={AI_ICON} />
+        <Button label="Start a new conversation" onPress={handleStart} loading={isBusy} />
+        <Button label="Back to history" variant="secondary" onPress={backToIntro} />
+      </ScreenContainer>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <ScrollView ref={scrollRef} style={styles.flex} contentContainerStyle={styles.messages}>
-        {messages.map((message) => (
-          <ChatBubble key={message.id} role={message.role} content={message.content} />
-        ))}
-      </ScrollView>
-
+    <ScreenContainer>
+      <ThemedText type="title" style={styles.title}>
+        {roleplay.title}
+      </ThemedText>
+      <ThemedText themeColor="textSecondary">{roleplay.description}</ThemedText>
       {error ? (
-        <ThemedText themeColor="danger" type="small" style={styles.errorText}>
+        <ThemedText themeColor="danger" type="small">
           {error}
         </ThemedText>
       ) : null}
+      {unfinished ? (
+        <Button label="Continue unfinished conversation" onPress={() => handleContinue(unfinished)} />
+      ) : null}
+      <Button
+        label={sessions.length > 0 ? 'Start a new conversation' : 'Start scenario'}
+        variant={unfinished ? 'secondary' : 'primary'}
+        onPress={handleStart}
+        loading={isBusy}
+      />
 
-      <View style={[styles.composer, { borderTopColor: theme.border }]}>
-        <VoiceToTextButton
-          onTranscript={(text) => setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))}
-          disabled={isBusy}
-        />
-        <TextField
-          label=""
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type your response, or use the mic above..."
-          style={styles.composerInput}
-        />
-        <View style={styles.composerButtons}>
-          <Button label="Send" onPress={handleSend} loading={isBusy} disabled={!draft.trim()} style={styles.flex} />
-          <Button label="Finish" onPress={handleFinish} variant="secondary" disabled={isBusy} style={styles.flex} />
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+      {sessionsQuery.isError ? (
+        <Pressable onPress={() => sessionsQuery.refetch()}>
+          <ThemedText type="small" themeColor="danger">
+            Couldn&apos;t load your previous conversations. Tap to retry.
+          </ThemedText>
+        </Pressable>
+      ) : null}
+      <SessionHistoryList sessions={sessions} aiIcon={AI_ICON} onContinue={handleContinue} />
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  introContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 },
-  title: { fontSize: 26, lineHeight: 32, textAlign: 'center' },
-  centerText: { textAlign: 'center' },
-  messages: { padding: 16, gap: 4 },
-  errorText: { paddingHorizontal: 16 },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth, padding: 12, gap: 8 },
-  composerInput: { marginBottom: 0 },
-  composerButtons: { flexDirection: 'row', gap: 10 },
+  title: { fontSize: 26, lineHeight: 32 },
+  center: { alignItems: 'center', gap: Spacing.two },
 });

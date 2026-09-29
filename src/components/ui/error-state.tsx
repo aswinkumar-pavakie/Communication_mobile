@@ -1,7 +1,9 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/ui/button';
+import { IconBadge } from '@/components/ui/list-row';
 import { ThemedText } from '@/components/themed-text';
+import { useTheme } from '@/hooks/use-theme';
 
 interface ErrorStateProps {
   message?: string;
@@ -9,12 +11,18 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ message = 'Something went wrong.', onRetry }: ErrorStateProps) {
+  const theme = useTheme();
+  const isNetwork = /network|timeout|connect/i.test(message);
   return (
     <View style={styles.container}>
-      <ThemedText themeColor="danger" type="small" style={styles.text}>
+      <IconBadge name={isNetwork ? 'wifi-off' : 'alert-circle-outline'} color={theme.danger} size={64} />
+      <ThemedText type="smallBold" style={styles.text}>
+        {isNetwork ? "Can't reach the server" : 'Something went wrong'}
+      </ThemedText>
+      <ThemedText themeColor="textSecondary" type="small" style={styles.text}>
         {message}
       </ThemedText>
-      {onRetry ? <Button label="Try again" onPress={onRetry} variant="secondary" /> : null}
+      {onRetry ? <Button label="Try again" onPress={onRetry} variant="secondary" style={styles.button} /> : null}
     </View>
   );
 }
@@ -37,6 +45,7 @@ export function apiErrorMessage(error: unknown): string {
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', gap: 12, paddingVertical: 40 },
+  container: { alignItems: 'center', gap: 10, paddingVertical: 40, paddingHorizontal: 24 },
   text: { textAlign: 'center' },
+  button: { alignSelf: 'stretch', marginTop: 6 },
 });

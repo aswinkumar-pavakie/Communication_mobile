@@ -1,40 +1,64 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { completeDebateSession, fetchDebate, sendDebateArgument, startDebateSession } from '@/api/debates';
+import {
+  completeDebateSession,
+  fetchDebate,
+  fetchDebateSessions,
+  sendDebateArgument,
+  startDebateSession,
+} from '@/api/debates';
+import { FeedbackBubble, formatWhen, parseAssessmentFeedback } from '@/components/activity-chat';
+import { ActiveChat, ChatThread, SessionHistoryList } from '@/components/chat-practice';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
-import { ChatBubble } from '@/components/ui/chat-bubble';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
 import { LoadingState } from '@/components/ui/loading-state';
 import { ScoreBadge } from '@/components/ui/score-badge';
-import { TextField } from '@/components/ui/text-field';
-import { VoiceToTextButton } from '@/components/voice-to-text-button';
-import { useTheme } from '@/hooks/use-theme';
-import type { ChatMessage, DebatePosition } from '@/types/api';
+import { ScreenContainer } from '@/components/ui/screen-container';
+import { Spacing } from '@/constants/theme';
+import type { AssessmentFeedback, ChatMessage, DebatePosition, DebateSessionHistoryItem } from '@/types/api';
 
 type Phase = 'intro' | 'active' | 'completed';
 
+const AI_ICON = 'account-voice';
+
+function positionLabel(position: DebatePosition): string {
+  return position === 'FOR' ? 'You argued for' : 'You argued against';
+}
+
 export default function DebateSessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const theme = useTheme();
-  const scrollRef = useRef<ScrollView>(null);
+  const queryClient = useQueryClient();
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [position, setPosition] = useState<DebatePosition>('FOR');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [banner, setBanner] = useState<string | undefined>();
   const [draft, setDraft] = useState('');
   const [isBusy, setIsBusy] = useState(false);
+  const [isReplying, setIsReplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [finalScore, setFinalScore] = useState<number | null>(null);
+  const [result, setResult] = useState<{ score: number | null; feedback: AssessmentFeedback | null } | null>(null);
+
+  const sessionsKey = ['debate-sessions', id];
 
   const { data: debate, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['debate', id],
     queryFn: () => fetchDebate(id),
   });
+  const sessionsQuery = useQuery({ queryKey: sessionsKey, queryFn: () => fetchDebateSessions(id) });
+  const sessions = sessionsQuery.data?.items ?? [];
+  const unfinished = sessions.find((s) => s.status === 'STARTED');
+
+  function backToIntro() {
+    void queryClient.invalidateQueries({ queryKey: sessionsKey });
+    setPhase('intro');
+    setError(null);
+  }
 
   async function handleStart() {
     setError(null);
@@ -43,12 +67,23 @@ export default function DebateSessionScreen() {
       const { session, message } = await startDebateSession(id, position);
       setSessionId(session.id);
       setMessages([message]);
+      setBanner(`${positionLabel(position)} the motion`);
       setPhase('active');
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
+  }
+
+  function handleContinue(session: DebateSessionHistoryItem) {
+    setSessionId(session.id);
+    setPosition(session.studentPosition);
+    setMessages(session.messages);
+    setBanner(`Continuing your debate from ${formatWhen(session.createdAt)} · ${positionLabel(session.studentPosition)}`);
+    setError(null);
+    setPhase('active');
   }
 
   async function handleSend() {
@@ -62,15 +97,16 @@ export default function DebateSessionScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setDraft('');
     setIsBusy(true);
+    setIsReplying(true);
     setError(null);
     try {
       const reply = await sendDebateArgument(id, sessionId, userMessage.content);
       setMessages((prev) => [...prev, reply]);
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
+      setIsReplying(false);
     }
   }
 
@@ -80,8 +116,15 @@ export default function DebateSessionScreen() {
     setError(null);
     try {
       const summary = await completeDebateSession(id, sessionId);
-      setFinalScore(summary.overallScore);
+      setResult({
+        score: summary.overallScore,
+        feedback: parseAssessmentFeedback(summary.feedback, summary.overallScore),
+      });
       setPhase('completed');
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
+      for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -92,100 +135,101 @@ export default function DebateSessionScreen() {
   if (isLoading) return <LoadingState label="Loading topic..." />;
   if (isError || !debate) return <ErrorState message={apiErrorMessage(loadError)} onRetry={refetch} />;
 
-  if (phase === 'intro') {
+  if (phase === 'active') {
     return (
-      <View style={styles.introContainer}>
-        <ThemedText type="title" style={styles.title}>
-          {debate.topic}
-        </ThemedText>
-        <ThemedText themeColor="textSecondary">{debate.description}</ThemedText>
-
-        <ThemedText type="smallBold">Pick your position</ThemedText>
-        <View style={styles.positionRow}>
-          <Button
-            label="For"
-            variant={position === 'FOR' ? 'primary' : 'secondary'}
-            onPress={() => setPosition('FOR')}
-            style={styles.flex}
-          />
-          <Button
-            label="Against"
-            variant={position === 'AGAINST' ? 'primary' : 'secondary'}
-            onPress={() => setPosition('AGAINST')}
-            style={styles.flex}
-          />
-        </View>
-
-        {error ? (
-          <ThemedText themeColor="danger" type="small">
-            {error}
-          </ThemedText>
-        ) : null}
-        <Button label="Start debate" onPress={handleStart} loading={isBusy} />
-      </View>
+      <ActiveChat
+        messages={messages}
+        aiIcon={AI_ICON}
+        draft={draft}
+        onDraftChange={setDraft}
+        isBusy={isBusy}
+        isReplying={isReplying}
+        error={error}
+        placeholder="Type your argument, or use the mic above..."
+        onSend={handleSend}
+        onFinish={handleFinish}
+        banner={banner}
+      />
     );
   }
 
   if (phase === 'completed') {
     return (
-      <View style={styles.introContainer}>
-        <ScoreBadge score={finalScore ?? 0} size="large" />
-        <ThemedText type="smallBold">Debate complete!</ThemedText>
-        <ThemedText themeColor="textSecondary" style={styles.centerText}>
-          Check your Progress tab to see your updated skill scores.
+      <ScreenContainer>
+        <View style={styles.center}>
+          <ScoreBadge score={result?.score ?? 0} size="large" />
+          <ThemedText type="smallBold">Debate complete!</ThemedText>
+        </View>
+        {result?.feedback ? <FeedbackBubble assessment={result.feedback} title="Debate feedback" /> : null}
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          Your debate
         </ThemedText>
-      </View>
+        <ChatThread messages={messages} aiIcon={AI_ICON} />
+        {/* Back to the intro so the student can pick a side again; history is refreshed there. */}
+        <Button label="New debate / view history" onPress={backToIntro} />
+      </ScreenContainer>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <ScrollView ref={scrollRef} style={styles.flex} contentContainerStyle={styles.messages}>
-        {messages.map((message) => (
-          <ChatBubble key={message.id} role={message.role} content={message.content} />
-        ))}
-      </ScrollView>
+    <ScreenContainer>
+      <ThemedText type="title" style={styles.title}>
+        {debate.topic}
+      </ThemedText>
+      <ThemedText themeColor="textSecondary">{debate.description}</ThemedText>
+
+      {unfinished ? (
+        <Button label="Continue unfinished debate" onPress={() => handleContinue(unfinished)} />
+      ) : null}
+
+      <ThemedText type="smallBold">Pick your position</ThemedText>
+      <View style={styles.positionRow}>
+        <Button
+          label="For"
+          variant={position === 'FOR' ? 'primary' : 'secondary'}
+          onPress={() => setPosition('FOR')}
+          style={styles.flex}
+        />
+        <Button
+          label="Against"
+          variant={position === 'AGAINST' ? 'primary' : 'secondary'}
+          onPress={() => setPosition('AGAINST')}
+          style={styles.flex}
+        />
+      </View>
 
       {error ? (
-        <ThemedText themeColor="danger" type="small" style={styles.errorText}>
+        <ThemedText themeColor="danger" type="small">
           {error}
         </ThemedText>
       ) : null}
+      <Button
+        label={sessions.length > 0 ? 'Start a new debate' : 'Start debate'}
+        variant={unfinished ? 'secondary' : 'primary'}
+        onPress={handleStart}
+        loading={isBusy}
+      />
 
-      <View style={[styles.composer, { borderTopColor: theme.border }]}>
-        <VoiceToTextButton
-          onTranscript={(text) => setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))}
-          disabled={isBusy}
-        />
-        <TextField
-          label=""
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type your argument, or use the mic above..."
-          style={styles.composerInput}
-        />
-        <View style={styles.composerButtons}>
-          <Button label="Send" onPress={handleSend} loading={isBusy} disabled={!draft.trim()} style={styles.flex} />
-          <Button label="Finish" onPress={handleFinish} variant="secondary" disabled={isBusy} style={styles.flex} />
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+      {sessionsQuery.isError ? (
+        <Pressable onPress={() => sessionsQuery.refetch()}>
+          <ThemedText type="small" themeColor="danger">
+            Couldn&apos;t load your previous debates. Tap to retry.
+          </ThemedText>
+        </Pressable>
+      ) : null}
+      <SessionHistoryList
+        sessions={sessions}
+        aiIcon={AI_ICON}
+        describe={(s) => (s.studentPosition === 'FOR' ? 'For' : 'Against')}
+        onContinue={handleContinue}
+      />
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  introContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 },
-  title: { fontSize: 26, lineHeight: 32, textAlign: 'center' },
-  centerText: { textAlign: 'center' },
-  positionRow: { flexDirection: 'row', gap: 10, width: '100%' },
-  messages: { padding: 16, gap: 4 },
-  errorText: { paddingHorizontal: 16 },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth, padding: 12, gap: 8 },
-  composerInput: { marginBottom: 0 },
-  composerButtons: { flexDirection: 'row', gap: 10 },
+  title: { fontSize: 26, lineHeight: 32 },
+  center: { alignItems: 'center', gap: Spacing.two },
+  positionRow: { flexDirection: 'row', gap: 10 },
 });

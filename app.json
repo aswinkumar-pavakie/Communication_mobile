@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Communication_mobile",
+    "name": "Communication Assistant",
     "slug": "Communication_mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -28,7 +28,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#3c87f7",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

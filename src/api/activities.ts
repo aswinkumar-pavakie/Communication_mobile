@@ -3,6 +3,7 @@ import type {
   Activity,
   ActivityType,
   ApiSuccessResponse,
+  AttemptHistoryItem,
   AttemptResult,
   Difficulty,
   PaginatedResult,
@@ -26,6 +27,18 @@ export async function fetchActivities(filters: ActivityFilters = {}): Promise<Pa
 
 export async function fetchActivity(id: string): Promise<Activity> {
   const response = await apiClient.get<ApiSuccessResponse<Activity>>(`/activities/${id}`);
+  return unwrap(response);
+}
+
+/** The student's saved answers for one activity, newest first. */
+export async function fetchActivityAttempts(
+  activityId: string,
+  limit = 50,
+): Promise<PaginatedResult<AttemptHistoryItem>> {
+  const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<AttemptHistoryItem>>>(
+    `/activities/${activityId}/attempts`,
+    { params: { limit } },
+  );
   return unwrap(response);
 }
 

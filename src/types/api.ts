@@ -117,6 +117,15 @@ export interface AssessmentResult {
   scores: { skillId: string; score: number; skill: Skill }[];
 }
 
+/** The feedback shape every scored practice mode shares (activities, interviews, roleplay, debate, writing). */
+export interface AssessmentFeedback {
+  overallScore: number;
+  feedback: string;
+  strengths: string[];
+  weaknesses: string[];
+  suggestedResponse?: string | null;
+}
+
 export interface ActivityAttempt {
   id: string;
   studentId: string;
@@ -127,6 +136,13 @@ export interface ActivityAttempt {
   responseText?: string | null;
   audioUrl?: string | null;
   overallScore?: number | null;
+  createdAt: string;
+}
+
+/** One saved answer in an activity's history - the student's response plus the coach's feedback. */
+export interface AttemptHistoryItem extends ActivityAttempt {
+  /** Null when scoring didn't finish (e.g. the AI call failed mid-attempt). */
+  assessment: Omit<AssessmentResult, 'scores'> | null;
 }
 
 export interface AttemptResult {
@@ -231,6 +247,32 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   createdAt: string;
+}
+
+/** A saved roleplay/debate conversation. `feedback` is the stored assessment JSON (null until finished). */
+export interface ChatSessionHistoryItem {
+  id: string;
+  status: AttemptStatus;
+  createdAt: string;
+  completedAt?: string | null;
+  overallScore: number | null;
+  feedback: unknown;
+  messages: ChatMessage[];
+}
+
+export interface DebateSessionHistoryItem extends ChatSessionHistoryItem {
+  studentPosition: DebatePosition;
+}
+
+export interface InterviewAttemptHistoryItem {
+  id: string;
+  status: AttemptStatus;
+  createdAt: string;
+  completedAt?: string | null;
+  overallScore: number | null;
+  answers: (InterviewAnswer & { question: InterviewQuestion; createdAt: string })[];
+  /** Where to resume an in-progress attempt; null when finished or every question is answered. */
+  nextQuestion: InterviewQuestion | null;
 }
 
 export interface WritingActivity {

@@ -1,42 +1,83 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View, type ScrollView } from 'react-native';
 
-import { fetchWritingActivity, submitWriting } from '@/api/writing';
+import { fetchWritingActivity, fetchWritingSubmissions, submitWriting } from '@/api/writing';
+import {
+  CoachBubble,
+  FeedbackBubble,
+  formatWhen,
+  HistoryGroup,
+  HistoryHeader,
+  parseAssessmentFeedback,
+  TypingBubble,
+  UserBubble,
+  useFoldState,
+} from '@/components/activity-chat';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { apiErrorMessage, ErrorState } from '@/components/ui/error-state';
 import { LoadingState } from '@/components/ui/loading-state';
-import { ScoreBadge } from '@/components/ui/score-badge';
 import { ScreenContainer } from '@/components/ui/screen-container';
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
-import type { WritingSubmission } from '@/types/api';
-import { StyleSheet, View } from 'react-native';
+import type { PaginatedResult, WritingSubmission } from '@/types/api';
+
+const TASK_ICON = 'pencil-outline';
 
 export default function WritingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const scrollRef = useRef<ScrollView>(null);
+
   const [content, setContent] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [submission, setSubmission] = useState<WritingSubmission | null>(null);
+
+  const submissionsKey = ['writing-submissions', id];
 
   const { data: activity, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['writing-activity', id],
     queryFn: () => fetchWritingActivity(id),
   });
+  const submissionsQuery = useQuery({ queryKey: submissionsKey, queryFn: () => fetchWritingSubmissions(id) });
+
+  // API returns newest first; read the drafts oldest -> newest like a chat.
+  const drafts = useMemo(() => [...(submissionsQuery.data?.items ?? [])].reverse(), [submissionsQuery.data]);
+  const latest = drafts.at(-1);
+  const fold = useFoldState(
+    drafts.map((d) => d.id),
+    latest?.id,
+  );
+
+  function scrollToEnd() {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+  }
 
   async function handleSubmit() {
+    const text = content.trim();
     setError(null);
-    setIsSubmitting(true);
+    setPending(text);
+    setContent('');
+    scrollToEnd();
     try {
-      const result = await submitWriting(id, content.trim());
-      setSubmission(result);
+      const submission = await submitWriting(id, text);
+      queryClient.setQueryData<PaginatedResult<WritingSubmission>>(submissionsKey, (old) =>
+        old ? { ...old, items: [submission, ...old.items.filter((s) => s.id !== submission.id)] } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: submissionsKey });
+      for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      fold.reset(); // only the new draft stays open
+      scrollToEnd();
     } catch (err) {
       setError(apiErrorMessage(err));
+      setContent(text); // never lose what they wrote
     } finally {
-      setIsSubmitting(false);
+      setPending(null);
     }
   }
 
@@ -57,67 +98,92 @@ export default function WritingDetailScreen() {
   }
 
   return (
-    <ScreenContainer>
+    <ScreenContainer scrollRef={scrollRef}>
       <ThemedText type="title" style={styles.title}>
         {activity.title}
       </ThemedText>
-      <Card>
-        <ThemedText type="smallBold">Prompt</ThemedText>
-        <ThemedText type="small">{activity.prompt}</ThemedText>
-      </Card>
+      {activity.description ? <ThemedText themeColor="textSecondary">{activity.description}</ThemedText> : null}
 
-      {submission ? (
-        <Card style={styles.resultCard}>
-          <View style={styles.scoreRow}>
-            <ScoreBadge score={submission.overallScore ?? 0} size="large" />
-            <ThemedText type="smallBold" style={styles.flex}>
-              {submission.feedback?.feedback}
-            </ThemedText>
-          </View>
-          {submission.feedback?.strengths.length ? (
-            <View style={styles.section}>
-              <ThemedText type="smallBold" themeColor="success">
-                Strengths
-              </ThemedText>
-              {submission.feedback.strengths.map((s, i) => (
-                <ThemedText key={i} type="small">
-                  • {s}
-                </ThemedText>
-              ))}
-            </View>
-          ) : null}
-          {submission.feedback?.weaknesses.length ? (
-            <View style={styles.section}>
-              <ThemedText type="smallBold" themeColor="warning">
-                Areas to improve
-              </ThemedText>
-              {submission.feedback.weaknesses.map((w, i) => (
-                <ThemedText key={i} type="small">
-                  • {w}
-                </ThemedText>
-              ))}
-            </View>
-          ) : null}
-        </Card>
-      ) : (
+      <CoachBubble icon={TASK_ICON}>
+        <ThemedText type="smallBold">Your task</ThemedText>
+        <ThemedText type="small">{activity.prompt}</ThemedText>
+      </CoachBubble>
+
+      {submissionsQuery.isError ? (
+        <Pressable onPress={() => submissionsQuery.refetch()}>
+          <ThemedText type="small" themeColor="danger">
+            Couldn&apos;t load your previous drafts. Tap to retry.
+          </ThemedText>
+        </Pressable>
+      ) : null}
+
+      <HistoryHeader
+        title="Your drafts"
+        count={drafts.length}
+        allExpanded={fold.allExpanded}
+        onToggleAll={fold.toggleAll}
+      />
+      {drafts.map((draft, index) => {
+        const feedback = parseAssessmentFeedback(draft.feedback, draft.overallScore);
+        return (
+          <HistoryGroup
+            key={draft.id}
+            icon={TASK_ICON}
+            title={`Draft ${index + 1}`}
+            when={formatWhen(draft.createdAt)}
+            preview={draft.content}
+            score={draft.overallScore}
+            expanded={fold.isExpanded(draft.id)}
+            onToggle={() => fold.toggle(draft.id)}
+          >
+            <UserBubble text={draft.content} label="Your writing" />
+            {feedback ? <FeedbackBubble assessment={feedback} /> : null}
+          </HistoryGroup>
+        );
+      })}
+
+      {pending !== null ? (
+        <View style={styles.pending}>
+          <UserBubble text={pending} label="Your writing" />
+          <TypingBubble label="Coach is reviewing your writing..." />
+        </View>
+      ) : null}
+
+      <View style={styles.composer}>
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          {drafts.length > 0 ? 'Write an improved version' : 'Your submission'}
+        </ThemedText>
         <Card>
+          {latest && !content ? (
+            <Pressable onPress={() => setContent(latest.content)} hitSlop={6}>
+              <ThemedText type="smallBold" themeColor="primary">
+                Start from my last draft
+              </ThemedText>
+            </Pressable>
+          ) : null}
           <TextField
-            label="Your submission"
+            label="Your writing"
             value={content}
             onChangeText={setContent}
             multiline
             numberOfLines={10}
             style={styles.textArea}
             placeholder="Write your response here..."
+            editable={pending === null}
           />
           {error ? (
             <ThemedText themeColor="danger" type="small">
               {error}
             </ThemedText>
           ) : null}
-          <Button label="Submit" onPress={handleSubmit} loading={isSubmitting} disabled={!content.trim()} />
+          <Button
+            label="Submit"
+            onPress={handleSubmit}
+            loading={pending !== null}
+            disabled={!content.trim() || pending !== null}
+          />
         </Card>
-      )}
+      </View>
     </ScreenContainer>
   );
 }
@@ -125,8 +191,6 @@ export default function WritingDetailScreen() {
 const styles = StyleSheet.create({
   title: { fontSize: 26, lineHeight: 32 },
   textArea: { minHeight: 160, textAlignVertical: 'top' },
-  resultCard: { gap: Spacing.three },
-  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  section: { gap: Spacing.one },
-  flex: { flex: 1 },
+  pending: { gap: Spacing.three },
+  composer: { gap: Spacing.two },
 });

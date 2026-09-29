@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from '@/lib/api-client';
-import type { ApiSuccessResponse, ChatMessage, PaginatedResult, Roleplay } from '@/types/api';
+import type { ApiSuccessResponse, ChatMessage, ChatSessionHistoryItem, PaginatedResult, Roleplay } from '@/types/api';
 
 export async function fetchRoleplays(): Promise<PaginatedResult<Roleplay>> {
   const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<Roleplay>>>('/roleplays');
@@ -15,6 +15,8 @@ export interface RoleplaySessionSummary {
   id: string;
   status: string;
   overallScore: number | null;
+  /** Stored assessment JSON - present once the session is completed. */
+  feedback?: unknown;
 }
 
 export async function startRoleplaySession(
@@ -57,6 +59,15 @@ export interface RoleplaySessionDetail extends RoleplaySessionSummary {
 export async function fetchRoleplaySession(sessionId: string): Promise<RoleplaySessionDetail> {
   const response = await apiClient.get<ApiSuccessResponse<RoleplaySessionDetail>>(
     `/roleplays/sessions/${sessionId}`,
+  );
+  return unwrap(response);
+}
+
+/** The student's conversations for one scenario (newest first), including unfinished ones. */
+export async function fetchRoleplaySessions(roleplayId: string): Promise<PaginatedResult<ChatSessionHistoryItem>> {
+  const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<ChatSessionHistoryItem>>>(
+    `/roleplays/${roleplayId}/sessions`,
+    { params: { limit: 30 } },
   );
   return unwrap(response);
 }

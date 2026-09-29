@@ -1,5 +1,12 @@
 import { apiClient, unwrap } from '@/lib/api-client';
-import type { ApiSuccessResponse, Interview, InterviewAnswer, InterviewQuestion, PaginatedResult } from '@/types/api';
+import type {
+  ApiSuccessResponse,
+  Interview,
+  InterviewAnswer,
+  InterviewAttemptHistoryItem,
+  InterviewQuestion,
+  PaginatedResult,
+} from '@/types/api';
 
 export async function fetchInterviews(): Promise<PaginatedResult<Interview>> {
   const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<Interview>>>('/interviews');
@@ -62,5 +69,14 @@ export interface InterviewResult extends InterviewAttemptSummary {
 
 export async function fetchInterviewResult(interviewId: string): Promise<InterviewResult> {
   const response = await apiClient.get<ApiSuccessResponse<InterviewResult>>(`/interviews/${interviewId}/result`);
+  return unwrap(response);
+}
+
+/** The student's attempts at one interview (newest first) with every Q&A; unfinished ones can be resumed. */
+export async function fetchInterviewAttempts(interviewId: string): Promise<PaginatedResult<InterviewAttemptHistoryItem>> {
+  const response = await apiClient.get<ApiSuccessResponse<PaginatedResult<InterviewAttemptHistoryItem>>>(
+    `/interviews/${interviewId}/attempts`,
+    { params: { limit: 30 } },
+  );
   return unwrap(response);
 }

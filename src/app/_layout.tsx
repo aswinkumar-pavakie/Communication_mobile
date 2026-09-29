@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -49,6 +50,8 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <ThemeProvider value={colorScheme === 'dark' ? AppDarkTheme : AppLightTheme}>
+              {/* Every screen has a blue header/hero at the top, so status-bar icons are always light. */}
+              <StatusBar style="light" />
               <Stack screenOptions={{ headerShown: false }} />
             </ThemeProvider>
           </AuthProvider>

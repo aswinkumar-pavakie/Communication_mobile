@@ -19,7 +19,7 @@ export const Colors = {
     success: '#1E9E5A',
     warning: '#D97706',
     danger: '#DC2626',
-    border: '#E4E4E9',
+    border: '#D8D9E2',
   },
   dark: {
     text: '#ffffff',
