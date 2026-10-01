@@ -21,9 +21,11 @@ import { ScreenContainer } from '@/components/ui/screen-container';
 import { TextField } from '@/components/ui/text-field';
 import { VoiceRecorderPanel } from '@/components/voice-recorder-panel';
 import { Spacing } from '@/constants/theme';
-import type { AttemptHistoryItem, AttemptResult, PaginatedResult } from '@/types/api';
+import type { AttemptHistoryItem, AttemptResult, PaginatedResult, PronunciationResult } from '@/types/api';
 
-const VOICE_ELIGIBLE_TYPES = new Set(['SPEAKING', 'INTERVIEW', 'ROLEPLAY', 'DEBATE']);
+const VOICE_ELIGIBLE_TYPES = new Set(['SPEAKING', 'INTERVIEW', 'ROLEPLAY', 'DEBATE', 'PRONUNCIATION']);
+/** Scored from the audio itself, so typing isn't an option (the backend rejects it too). */
+const VOICE_ONLY_TYPES = new Set(['PRONUNCIATION']);
 
 /** What's in flight right now - shown as a user bubble + "reviewing" bubble until the score lands. */
 type Pending = { kind: 'text'; text: string } | { kind: 'voice' };
@@ -41,6 +43,8 @@ export default function ActivityDetailScreen() {
   const [feedbackAudio, setFeedbackAudio] = useState<Record<string, string>>({});
   /** Voice attempts made this session - catches spoken answers saved without a stored recording. */
   const [spokenIds, setSpokenIds] = useState<Record<string, true>>({});
+  /** Audio-measured pronunciation breakdowns from this session, keyed by attempt id. */
+  const [pronunciation, setPronunciation] = useState<Record<string, PronunciationResult>>({});
 
   const attemptsKey = ['activity-attempts', id];
 
@@ -66,7 +70,10 @@ export default function ActivityDetailScreen() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
   }
 
-  function handleResult(result: AttemptResult, extra: { feedbackAudioUri?: string; spoken?: boolean } = {}) {
+  function handleResult(
+    result: AttemptResult,
+    extra: { feedbackAudioUri?: string; spoken?: boolean; pronunciation?: PronunciationResult | null } = {},
+  ) {
     const item: AttemptHistoryItem = { ...result.attempt, assessment: result.assessment };
     queryClient.setQueryData<PaginatedResult<AttemptHistoryItem>>(attemptsKey, (old) =>
       old
@@ -79,12 +86,14 @@ export default function ActivityDetailScreen() {
     );
     void queryClient.invalidateQueries({ queryKey: attemptsKey });
     // A scored attempt moves progress, streak and recommendations - refresh those screens too.
-    for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+    for (const key of ['dashboard', 'progress-overview', 'progress-history', 'streak-calendar']) {
       void queryClient.invalidateQueries({ queryKey: [key] });
     }
 
     const feedbackAudioUri = extra.feedbackAudioUri;
     if (feedbackAudioUri) setFeedbackAudio((prev) => ({ ...prev, [item.id]: feedbackAudioUri }));
+    const measured = extra.pronunciation;
+    if (measured) setPronunciation((prev) => ({ ...prev, [item.id]: measured }));
     if (extra.spoken) setSpokenIds((prev) => ({ ...prev, [item.id]: true }));
     fold.reset(); // fold older attempts so the new exchange is the one in focus
     setPending(null);
@@ -123,6 +132,8 @@ export default function ActivityDetailScreen() {
   }
 
   const supportsVoice = VOICE_ELIGIBLE_TYPES.has(activity.type);
+  const voiceOnly = VOICE_ONLY_TYPES.has(activity.type);
+  const inputMode = voiceOnly ? 'voice' : mode;
 
   return (
     <ScreenContainer scrollRef={scrollRef}>
@@ -160,6 +171,7 @@ export default function ActivityDetailScreen() {
           onToggle={() => fold.toggle(item.id)}
           spoken={Boolean(item.audioUrl) || Boolean(spokenIds[item.id])}
           feedbackAudioUri={feedbackAudio[item.id]}
+          pronunciation={pronunciation[item.id]}
         />
       ))}
 
@@ -179,7 +191,13 @@ export default function ActivityDetailScreen() {
           {thread.length > 0 ? 'Answer again to improve your score' : 'Your answer'}
         </ThemedText>
 
-        {supportsVoice ? (
+        {voiceOnly ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            Pronunciation is scored from your voice - read the passage aloud clearly.
+          </ThemedText>
+        ) : null}
+
+        {supportsVoice && !voiceOnly ? (
           <View style={styles.modeSwitch}>
             <Button
               label="Type answer"
@@ -199,7 +217,7 @@ export default function ActivityDetailScreen() {
         ) : null}
 
         <Card>
-          {mode === 'text' || !supportsVoice ? (
+          {inputMode === 'text' || !supportsVoice ? (
             <>
               <TextField
                 label="Your response"
@@ -230,7 +248,13 @@ export default function ActivityDetailScreen() {
                 setPending({ kind: 'voice' });
                 scrollToEnd();
               }}
-              onResult={(result, feedbackAudioUri) => handleResult(result, { feedbackAudioUri, spoken: true })}
+              onResult={(result, feedbackAudioUri, measured) =>
+                handleResult(result, {
+                  feedbackAudioUri: feedbackAudioUri ?? undefined,
+                  spoken: true,
+                  pronunciation: measured,
+                })
+              }
               onError={() => setPending(null)}
             />
           )}

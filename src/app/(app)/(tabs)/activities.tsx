@@ -168,7 +168,7 @@ function ActivityRow({ activity }: { activity: Activity | null }) {
 export default function ActivitiesScreen() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['activities'],
-    queryFn: () => fetchActivities({ limit: 50 }),
+    queryFn: () => fetchActivities({ limit: 100 }), // server max (MAX_PAGE_LIMIT)
   });
 
   if (isLoading) {

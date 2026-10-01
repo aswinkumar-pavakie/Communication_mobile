@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from '@/lib/api-client';
-import type { ApiSuccessResponse, AssessmentResult, ActivityAttempt } from '@/types/api';
+import type { ApiSuccessResponse, AssessmentResult, ActivityAttempt, PronunciationResult } from '@/types/api';
 
 export interface AudioFile {
   uri: string;
@@ -55,7 +55,10 @@ export interface VoiceAnalyzeResult {
   attempt: ActivityAttempt;
   assessment: AssessmentResult;
   transcript: string;
-  audioFeedback: SynthesizeResult;
+  /** Null when the recording had too little speech to score. */
+  pronunciation: PronunciationResult | null;
+  /** Null when text-to-speech was unavailable (e.g. daily quota) - written feedback is still complete. */
+  audioFeedback: SynthesizeResult | null;
 }
 
 export async function analyzeVoice(activityId: string, audio: AudioFile): Promise<VoiceAnalyzeResult> {

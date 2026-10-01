@@ -47,7 +47,9 @@ interface Turn {
 type Phase =
   | { kind: 'intro' }
   | { kind: 'active'; attemptId: string; question: InterviewQuestion; turns: Turn[]; resumed: boolean }
-  | { kind: 'completed'; summary: InterviewAttemptSummary; turns: Turn[] };
+  | { kind: 'completed'; summary: InterviewAttemptSummary; turns: Turn[] }
+  /** Every question answered (and saved) but closing the attempt failed - offer a retry. */
+  | { kind: 'finish'; attemptId: string; turns: Turn[] };
 
 function turnsFrom(attempt: InterviewAttemptHistoryItem): Turn[] {
   return attempt.answers.map((a) => ({
@@ -111,7 +113,7 @@ export default function InterviewFlowScreen() {
 
   function refreshAfterCompletion() {
     void queryClient.invalidateQueries({ queryKey: attemptsKey });
-    for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+    for (const key of ['dashboard', 'progress-overview', 'progress-history', 'streak-calendar']) {
       void queryClient.invalidateQueries({ queryKey: [key] });
     }
   }
@@ -169,28 +171,57 @@ export default function InterviewFlowScreen() {
     setPendingAnswer(text);
     setAnswerText('');
     scrollToEnd();
+    let saved: Awaited<ReturnType<typeof submitInterviewAnswer>>;
     try {
-      const { answer, nextQuestion } = await submitInterviewAnswer(id, phase.attemptId, phase.question.id, text);
-      const turns: Turn[] = [
-        ...phase.turns,
-        {
-          id: answer.id,
-          question: phase.question,
-          answerText: text,
-          feedback: parseAssessmentFeedback(answer.feedback, answer.score),
-        },
-      ];
-      setPendingAnswer(null);
-      if (nextQuestion) {
-        setPhase({ ...phase, question: nextQuestion, turns });
-        scrollToEnd();
-      } else {
-        await finish(phase.attemptId, turns);
-      }
+      saved = await submitInterviewAnswer(id, phase.attemptId, phase.question.id, text);
     } catch (err) {
       setError(apiErrorMessage(err));
-      setAnswerText(text); // keep what they said so they can resend
+      setAnswerText(text); // not saved - keep what they said so they can resend
       setPendingAnswer(null);
+      setIsBusy(false);
+      return;
+    }
+
+    const { answer, nextQuestion } = saved;
+    const turns: Turn[] = [
+      ...phase.turns,
+      {
+        id: answer.id,
+        question: phase.question,
+        answerText: text,
+        feedback: parseAssessmentFeedback(answer.feedback, answer.score),
+      },
+    ];
+    setPendingAnswer(null);
+    // The answer is saved server-side now; keep the history/resume data in step with it.
+    void queryClient.invalidateQueries({ queryKey: attemptsKey });
+
+    if (nextQuestion) {
+      setPhase({ ...phase, question: nextQuestion, turns });
+      scrollToEnd();
+      setIsBusy(false);
+      return;
+    }
+
+    // Last answer saved. If closing the attempt fails, don't resend the answer - offer a retry.
+    setPhase({ kind: 'finish', attemptId: phase.attemptId, turns });
+    try {
+      await finish(phase.attemptId, turns);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleRetryFinish() {
+    if (phase.kind !== 'finish') return;
+    setError(null);
+    setIsBusy(true);
+    try {
+      await finish(phase.attemptId, phase.turns);
+    } catch (err) {
+      setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
@@ -266,6 +297,24 @@ export default function InterviewFlowScreen() {
     );
   }
 
+  if (phase.kind === 'finish') {
+    return (
+      <ScreenContainer scrollRef={scrollRef}>
+        <ThemedText type="title" style={styles.title}>
+          {interview.title}
+        </ThemedText>
+        <InterviewTurns turns={phase.turns} />
+        {isBusy ? <TypingBubble label="Calculating your interview score..." icon={AI_ICON} /> : null}
+        {error ? (
+          <ThemedText themeColor="danger" type="small">
+            {error}
+          </ThemedText>
+        ) : null}
+        <Button label="Finish & get score" onPress={handleRetryFinish} loading={isBusy} />
+      </ScreenContainer>
+    );
+  }
+
   if (phase.kind === 'completed') {
     return (
       <ScreenContainer>
@@ -301,6 +350,8 @@ export default function InterviewFlowScreen() {
           label={`Resume unfinished interview (${unfinished.answers.length} answered)`}
           onPress={() => handleResume(unfinished)}
           loading={isBusy}
+          // Resume from fresh data only - a stale list could point at an already-answered question.
+          disabled={attemptsQuery.isFetching}
         />
       ) : null}
       <Button

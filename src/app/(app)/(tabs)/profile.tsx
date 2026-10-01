@@ -1,10 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { fetchDashboard } from '@/api/dashboard';
+import { fetchStreakReminders, updateStreakReminders } from '@/api/streaks';
 import { ThemedText } from '@/components/themed-text';
+import { apiErrorMessage } from '@/components/ui/error-state';
 import { Button } from '@/components/ui/button';
 import { HeroCard, HeroPill } from '@/components/ui/hero-card';
 import { ListRow, SectionHeader, StatTile } from '@/components/ui/list-row';
@@ -18,6 +20,25 @@ export default function ProfileScreen() {
   const profile = user?.studentProfile;
   // Same query key as Home, so this is usually served from cache instantly.
   const { data: dashboard } = useQuery({ queryKey: ['dashboard'], queryFn: fetchDashboard });
+
+  const queryClient = useQueryClient();
+  const remindersQuery = useQuery({ queryKey: ['streak-reminders'], queryFn: fetchStreakReminders });
+  const remindersMutation = useMutation({
+    mutationFn: updateStreakReminders,
+    // Flip the switch immediately; roll back if the server says no.
+    onMutate: async (enabled: boolean) => {
+      await queryClient.cancelQueries({ queryKey: ['streak-reminders'] });
+      const previous = queryClient.getQueryData<{ streakReminderEmails: boolean }>(['streak-reminders']);
+      queryClient.setQueryData(['streak-reminders'], { streakReminderEmails: enabled });
+      return { previous };
+    },
+    onError: (_err, _enabled, context) => {
+      if (context?.previous) queryClient.setQueryData(['streak-reminders'], context.previous);
+    },
+    onSuccess: (data) => queryClient.setQueryData(['streak-reminders'], data),
+  });
+  const remindersOn = remindersQuery.data?.streakReminderEmails ?? true;
+  const remindersError = remindersMutation.error ?? remindersQuery.error;
 
   const fullName = profile ? `${profile.firstName} ${profile.lastName}`.trim() : (user?.email ?? 'Student');
   const details = [
@@ -58,6 +79,7 @@ export default function ProfileScreen() {
             color={dashboard.streak.currentStreak > 0 ? '#F97316' : '#9CA3AF'}
             value={`${dashboard.streak.currentStreak}`}
             label="day streak"
+            onPress={() => router.push('/(app)/streak')}
           />
           <StatTile icon="trophy-outline" color="#F59E0B" value={`${dashboard.streak.longestStreak}`} label="best streak" />
         </View>
@@ -91,9 +113,42 @@ export default function ProfileScreen() {
         />
       </View>
 
+      <SectionHeader title="Notifications" />
+      <View style={panel}>
+        <ListRow
+          variant="plain"
+          icon="bell-ring-outline"
+          iconColor="#F97316"
+          title="Streak reminder emails"
+          subtitle="An evening email if your streak is about to break"
+          right={
+            <Switch
+              value={remindersOn}
+              onValueChange={(v) => remindersMutation.mutate(v)}
+              disabled={remindersQuery.isLoading || remindersMutation.isPending || remindersQuery.isError}
+              trackColor={{ true: theme.primary, false: theme.backgroundSelected }}
+              thumbColor="#ffffff"
+            />
+          }
+        />
+        {remindersError ? (
+          <ThemedText type="small" themeColor="danger" style={styles.inlineError}>
+            {apiErrorMessage(remindersError)}
+          </ThemedText>
+        ) : null}
+      </View>
+
       <SectionHeader title="Account" />
       <View style={panel}>
         <ListRow variant="plain" icon="email-outline" iconColor="#6366F1" title="Email" subtitle={user?.email} />
+        <ListRow
+          variant="plain"
+          icon="lock-reset"
+          iconColor="#DB2777"
+          title="Change password"
+          subtitle="Signs you out on other devices"
+          onPress={() => router.push('/(app)/change-password')}
+        />
         <ListRow
           variant="plain"
           icon="shield-account-outline"
@@ -122,5 +177,6 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 8 },
   panel: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 4 },
   logout: { marginTop: 8 },
+  inlineError: { paddingBottom: 8 },
   version: { textAlign: 'center', fontSize: 12 },
 });

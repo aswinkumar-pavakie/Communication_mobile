@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Link } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,6 +107,14 @@ export default function LoginScreen() {
             }
           />
 
+          <Link href="/(auth)/forgot-password" asChild>
+            <Pressable hitSlop={8} style={styles.forgot}>
+              <ThemedText type="smallBold" themeColor="primary">
+                Forgot password?
+              </ThemedText>
+            </Pressable>
+          </Link>
+
           {error ? (
             <View style={[styles.errorBox, { backgroundColor: tint(theme.danger, 0.1), borderColor: tint(theme.danger, 0.3) }]}>
               <MaterialCommunityIcons name="alert-circle-outline" size={18} color={theme.danger} />
@@ -152,6 +161,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   welcome: { fontSize: 26, lineHeight: 32, fontWeight: '800' },
+  forgot: { alignSelf: 'flex-end', marginTop: -6 },
   errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 12 },
   features: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 12 },
   feature: { alignItems: 'center', gap: 6 },

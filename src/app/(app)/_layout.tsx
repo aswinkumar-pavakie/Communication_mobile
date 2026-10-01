@@ -1,14 +1,16 @@
 import { Redirect, Stack } from 'expo-router';
 
+import { StreakHeaderBadge } from '@/components/ui/streak-header-badge';
 import { useAuth } from '@/context/auth-context';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function AppLayout() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, connectionError } = useAuth();
   const theme = useTheme();
 
   if (!isLoading && !isAuthenticated) {
-    return <Redirect href="/(auth)/login" />;
+    // Offline with a saved session goes to the splash's Retry, not the login form.
+    return <Redirect href={connectionError ? '/' : '/(auth)/login'} />;
   }
 
   return (
@@ -19,6 +21,8 @@ export default function AppLayout() {
         headerTintColor: theme.onPrimary,
         headerTitleStyle: { color: theme.onPrimary },
         headerShadowVisible: false,
+        // Same streak flame as the tab screens, so it stays visible inside every practice.
+        headerRight: () => <StreakHeaderBadge edgeInset />,
         contentStyle: { backgroundColor: theme.background },
       }}
     >
@@ -34,6 +38,8 @@ export default function AppLayout() {
       <Stack.Screen name="writing/[id]" options={{ headerShown: true, title: 'Writing Activity' }} />
       <Stack.Screen name="reports/index" options={{ headerShown: true, title: 'Reports' }} />
       <Stack.Screen name="reports/[id]" options={{ headerShown: true, title: 'Report' }} />
+      <Stack.Screen name="streak" options={{ headerShown: true, title: 'Daily Streak' }} />
+      <Stack.Screen name="change-password" options={{ headerShown: true, title: 'Change Password' }} />
     </Stack>
   );
 }

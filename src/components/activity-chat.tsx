@@ -4,10 +4,12 @@ import { useState, type ComponentProps, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { ProgressBar } from '@/components/ui/progress-bar';
 import { ScoreBadge } from '@/components/ui/score-badge';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import type { AssessmentFeedback, AttemptHistoryItem } from '@/types/api';
+import { scoreTone } from '@/lib/format';
+import type { AssessmentFeedback, AttemptHistoryItem, PronunciationResult } from '@/types/api';
 
 type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -163,6 +165,53 @@ export function FeedbackBubble({
   );
 }
 
+function MetricRow({ label, value, bar }: { label: string; value: string; bar?: number }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.metric}>
+      <View style={styles.metricTop}>
+        <ThemedText type="small" style={styles.flex}>
+          {label}
+        </ThemedText>
+        <ThemedText type="smallBold">{value}</ThemedText>
+      </View>
+      {bar !== undefined ? <ProgressBar value={bar} height={6} color={theme[scoreTone(bar)]} /> : null}
+    </View>
+  );
+}
+
+/** Audio-measured pronunciation & delivery: clarity, pace, pauses and (for read-aloud) accuracy. */
+export function PronunciationBubble({ result }: { result: PronunciationResult }) {
+  const { metrics } = result;
+  const paceNote =
+    metrics.wordsPerMinute < 110 ? 'slow' : metrics.wordsPerMinute > 165 ? 'fast' : 'good pace';
+  return (
+    <CoachBubble icon="account-voice">
+      <ThemedText type="smallBold">Pronunciation & delivery</ThemedText>
+      <View style={styles.feedbackHeader}>
+        <ScoreBadge score={result.score} />
+        <ThemedText type="small" style={styles.flex}>
+          {result.feedback}
+        </ThemedText>
+      </View>
+      <MetricRow label="Clarity" value={`${metrics.clarity}/100`} bar={metrics.clarity} />
+      <MetricRow label="Pace" value={`${metrics.wordsPerMinute} wpm · ${paceNote}`} />
+      <MetricRow label="Long pauses" value={`${metrics.longPauses}`} />
+      {metrics.referenceAccuracy !== null ? (
+        <MetricRow
+          label="Reading accuracy"
+          value={`${metrics.referenceAccuracy}%`}
+          bar={metrics.referenceAccuracy}
+        />
+      ) : null}
+      <BulletSection title="Tips" items={result.improvements} color="warning" />
+      <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
+        Measured from your recording - how clearly and fluently you spoke.
+      </ThemedText>
+    </CoachBubble>
+  );
+}
+
 /**
  * Feedback is stored as JSON on sessions/answers/submissions; read it defensively so an
  * older or partial record just hides the feedback bubble instead of crashing the screen.
@@ -308,10 +357,20 @@ interface AttemptGroupProps {
   onToggle: () => void;
   spoken: boolean;
   feedbackAudioUri?: string;
+  /** Only available right after recording (the breakdown isn't stored; its score is). */
+  pronunciation?: PronunciationResult;
 }
 
 /** One saved activity answer + feedback exchange. */
-export function AttemptGroup({ number, item, expanded, onToggle, spoken, feedbackAudioUri }: AttemptGroupProps) {
+export function AttemptGroup({
+  number,
+  item,
+  expanded,
+  onToggle,
+  spoken,
+  feedbackAudioUri,
+  pronunciation,
+}: AttemptGroupProps) {
   return (
     <HistoryGroup
       icon={spoken ? 'microphone' : 'message-text-outline'}
@@ -325,7 +384,9 @@ export function AttemptGroup({ number, item, expanded, onToggle, spoken, feedbac
       <UserBubble text={item.responseText?.trim() || '(No speech was detected)'} spoken={spoken} />
       {item.assessment ? (
         <FeedbackBubble assessment={item.assessment} feedbackAudioUri={feedbackAudioUri} />
-      ) : (
+      ) : null}
+      {pronunciation ? <PronunciationBubble result={pronunciation} /> : null}
+      {item.assessment ? null : (
         <CoachBubble>
           <ThemedText type="small" themeColor="textSecondary">
             This answer wasn&apos;t scored. Try answering again.
@@ -358,4 +419,7 @@ const styles = StyleSheet.create({
   groupBody: { padding: 12, gap: Spacing.three },
   statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   statusText: { fontSize: 11, lineHeight: 16 },
+  metric: { gap: 4 },
+  metricTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  footnote: { fontSize: 12, lineHeight: 16 },
 });

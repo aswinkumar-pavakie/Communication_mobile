@@ -126,6 +126,22 @@ export interface AssessmentFeedback {
   suggestedResponse?: string | null;
 }
 
+/** Measured from the recording itself (not the transcript) - see backend SpeechSignalPronunciationProvider. */
+export interface PronunciationResult {
+  score: number;
+  feedback: string;
+  strengths: string[];
+  improvements: string[];
+  metrics: {
+    clarity: number;
+    wordsPerMinute: number;
+    longPauses: number;
+    referenceAccuracy: number | null;
+    speechSeconds: number;
+  };
+  method: 'speech-signal';
+}
+
 export interface ActivityAttempt {
   id: string;
   studentId: string;
@@ -200,7 +216,7 @@ export interface DashboardResponse {
     completedAt: string | null;
   }[];
   placementReadiness: { score: number; label: 'READY' | 'DEVELOPING' | 'NEEDS_PRACTICE' };
-  streak: { currentStreak: number; longestStreak: number };
+  streak: { currentStreak: number; longestStreak: number; practicedToday: boolean };
 }
 
 export interface Interview {
@@ -304,4 +320,16 @@ export interface Report {
   interviewReadiness: { score: number; label: string };
   recommendedActions: string[];
   createdAt: string;
+}
+
+/** GET /streaks/calendar - practice counts per day for one month (days in the backend's APP_TIMEZONE). */
+export interface StreakCalendar {
+  month: string;
+  today: string;
+  timeZone: string;
+  currentStreak: number;
+  longestStreak: number;
+  practicedToday: boolean;
+  /** Only days with at least one completed practice. */
+  days: { date: string; count: number }[];
 }

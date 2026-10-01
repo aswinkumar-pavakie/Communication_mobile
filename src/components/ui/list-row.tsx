@@ -76,17 +76,37 @@ export function SectionHeader({ title, action, onAction }: { title: string; acti
   );
 }
 
-/** Small stat card: icon, big value, caption. Lay 2-3 out in a row. */
-export function StatTile({ icon, color, value, label }: { icon: IconName; color: string; value: string; label: string }) {
+/** Small stat card: icon, big value, caption. Lay 2-3 out in a row. Tappable when `onPress` is set. */
+export function StatTile({
+  icon,
+  color,
+  value,
+  label,
+  onPress,
+}: {
+  icon: IconName;
+  color: string;
+  value: string;
+  label: string;
+  onPress?: () => void;
+}) {
   const theme = useTheme();
   return (
-    <View style={[styles.stat, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      style={({ pressed }) => [
+        styles.stat,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
+      ]}
+    >
       <IconBadge name={icon} color={color} size={36} />
       <ThemedText style={styles.statValue}>{value}</ThemedText>
       <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.statLabel}>
         {label}
       </ThemedText>
-    </View>
+    </Pressable>
   );
 }
 

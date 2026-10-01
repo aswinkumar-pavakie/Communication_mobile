@@ -68,7 +68,7 @@ export default function WritingDetailScreen() {
         old ? { ...old, items: [submission, ...old.items.filter((s) => s.id !== submission.id)] } : old,
       );
       void queryClient.invalidateQueries({ queryKey: submissionsKey });
-      for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+      for (const key of ['dashboard', 'progress-overview', 'progress-history', 'streak-calendar']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
       fold.reset(); // only the new draft stays open

@@ -75,7 +75,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     overflow: 'hidden',
   },
-  filler: { flex: 1, height: TILE_HEIGHT },
+  // Same padding + border box as a real tile (Card's 1.5px border), so the flex engine sizes
+  // both identically - without it the odd last tile came out wider than its neighbours on web.
+  filler: { flex: 1, height: TILE_HEIGHT, padding: 14, borderWidth: 1.5, borderColor: 'transparent' },
   tagsRow: { flexDirection: 'row', gap: 6, minHeight: 21 },
   tag: {
     flexShrink: 1,

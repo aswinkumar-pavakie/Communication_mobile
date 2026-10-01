@@ -27,8 +27,10 @@ export const Colors = {
     backgroundElement: '#212225',
     backgroundSelected: '#2E3135',
     textSecondary: '#B0B4BA',
-    primary: '#5b9dfb',
-    onPrimary: '#0b1220',
+    // Same brand blue as light mode so the blue header/tab bar/hero look identical in both
+    // themes, with white text on it (dark text on a pale blue read as "broken" in dark mode).
+    primary: '#3c87f7',
+    onPrimary: '#ffffff',
     success: '#34D399',
     warning: '#FBBF24',
     danger: '#F87171',

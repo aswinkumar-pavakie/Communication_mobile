@@ -1,6 +1,7 @@
 import { type MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, type ComponentProps } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   CoachBubble,
@@ -45,7 +46,8 @@ interface ActiveChatProps {
   messages: ChatMessage[];
   aiIcon: IconName;
   draft: string;
-  onDraftChange: (text: string) => void;
+  /** Accepts an updater so a finished voice transcript appends to what's typed *now*. */
+  onDraftChange: (next: string | ((prev: string) => string)) => void;
   isBusy: boolean;
   /** True while waiting for the AI's reply (vs. finishing/scoring). */
   isReplying: boolean;
@@ -72,7 +74,10 @@ export function ActiveChat({
   banner,
 }: ActiveChatProps) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  // Native stack header = status bar inset + standard bar height (44pt iOS, 56dp Android).
+  const headerHeight = insets.top + (Platform.OS === 'ios' ? 44 : 56);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -83,7 +88,7 @@ export function ActiveChat({
     <KeyboardAvoidingView
       style={[styles.flex, { backgroundColor: theme.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={headerHeight}
     >
       <ScrollView ref={scrollRef} style={styles.flex} contentContainerStyle={styles.messages}>
         {banner ? (
@@ -101,9 +106,15 @@ export function ActiveChat({
         </ThemedText>
       ) : null}
 
-      <View style={[styles.composer, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
+      <View
+        style={[
+          styles.composer,
+          // Clear the Android nav bar / iOS home indicator (edge-to-edge).
+          { borderTopColor: theme.border, backgroundColor: theme.background, paddingBottom: insets.bottom + 12 },
+        ]}
+      >
         <VoiceToTextButton
-          onTranscript={(text) => onDraftChange(draft.trim() ? `${draft.trim()} ${text}` : text)}
+          onTranscript={(text) => onDraftChange((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))}
           disabled={isBusy}
         />
         <TextField label="" value={draft} onChangeText={onDraftChange} placeholder={placeholder} />

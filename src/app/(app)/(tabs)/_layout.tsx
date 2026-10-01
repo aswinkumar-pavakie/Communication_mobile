@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { StreakHeaderBadge } from '@/components/ui/streak-header-badge';
 import { useTheme } from '@/hooks/use-theme';
 
 function TabHeaderTitle({ title, subtitle }: { title: string; subtitle: string }) {
@@ -28,6 +29,8 @@ export default function TabsLayout() {
         headerShown: true,
         headerStyle: { backgroundColor: theme.primary },
         headerShadowVisible: false,
+        headerRight: () => <StreakHeaderBadge />,
+        headerRightContainerStyle: { paddingRight: 16 },
         tabBarActiveTintColor: theme.onPrimary,
         tabBarInactiveTintColor: 'rgba(255,255,255,0.65)',
         tabBarStyle: {

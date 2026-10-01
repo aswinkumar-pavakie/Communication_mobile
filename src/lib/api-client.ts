@@ -1,4 +1,4 @@
-import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, isAxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { API_BASE_URL } from '@/config/env';
 import { secureStorage, STORAGE_KEYS } from '@/lib/storage';
 import type { ApiSuccessResponse, AuthResponse } from '@/types/api';
@@ -20,6 +20,20 @@ export function registerAuthExpiredHandler(handler: () => void): void {
 export function setTokens(next: { accessToken: string; refreshToken: string }): void {
   accessToken = next.accessToken;
   refreshToken = next.refreshToken;
+}
+
+export function getRefreshToken(): string | null {
+  return refreshToken;
+}
+
+/**
+ * True only when the server actually rejected the credentials (401/403) - as opposed to the
+ * phone being offline or the server timing out, which must NOT log the student out.
+ */
+export function isAuthRejection(error: unknown): boolean {
+  if (error instanceof Error && error.message === 'No refresh token available.') return true;
+  const status = isAxiosError(error) ? error.response?.status : undefined;
+  return status === 401 || status === 403;
 }
 
 export function clearTokens(): void {
@@ -60,7 +74,9 @@ export async function clearPersistedTokens(): Promise<void> {
 // eslint-disable-next-line import/no-named-as-default-member -- axios.create is the standard API
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30_000,
+  // Scoring chains several AI calls (STT -> LLM -> TTS); 30s cut off answers that the
+  // backend then saved anyway, tempting a duplicate retry.
+  timeout: 90_000,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -101,8 +117,11 @@ apiClient.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return apiClient(originalRequest);
       } catch (refreshError) {
-        await clearPersistedTokens();
-        onAuthExpired?.();
+        // Only a real rejection ends the session; a network blip during refresh keeps it.
+        if (isAuthRejection(refreshError)) {
+          await clearPersistedTokens();
+          onAuthExpired?.();
+        }
         return Promise.reject(refreshError);
       }
     }

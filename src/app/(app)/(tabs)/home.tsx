@@ -14,7 +14,7 @@ import { ScoreBadge } from '@/components/ui/score-badge';
 import { ScreenContainer } from '@/components/ui/screen-container';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { greeting, humanize, initials, relativeDay, scoreTone } from '@/lib/format';
+import { greeting, humanize, initials, relativeDay, scoreTone, tint } from '@/lib/format';
 import { ACTIVITY_TYPE_ICON } from '@/lib/practice-icons';
 
 const READINESS_LABEL: Record<string, string> = {
@@ -54,6 +54,9 @@ export default function HomeScreen() {
   }
 
   const { student, streak, placementReadiness } = data;
+  // Streak alive but nothing done yet today = it breaks at midnight.
+  const streakAtRisk = streak.currentStreak > 0 && !streak.practicedToday;
+  const quickPractice = data.todayActivities[0];
   const topSkills = [...data.skills].sort((a, b) => b.currentScore - a.currentScore).slice(0, 4);
 
   return (
@@ -109,16 +112,49 @@ export default function HomeScreen() {
           icon="fire"
           color={streak.currentStreak > 0 ? '#F97316' : '#9CA3AF'}
           value={`${streak.currentStreak}`}
-          label={streak.currentStreak === 1 ? 'day streak' : 'days streak'}
+          label="day streak"
+          onPress={() => router.push('/(app)/streak')}
         />
-        <StatTile icon="trophy-outline" color="#F59E0B" value={`${streak.longestStreak}`} label="best streak" />
+        <StatTile
+          icon="trophy-outline"
+          color="#F59E0B"
+          value={`${streak.longestStreak}`}
+          label="best streak"
+          onPress={() => router.push('/(app)/streak')}
+        />
         <StatTile icon="chart-line" color="#16A34A" value={`${data.skills.length}`} label="skills tracked" />
       </View>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.streakHint}>
-        {streak.currentStreak > 0
-          ? 'Complete one practice today to keep your streak alive.'
-          : 'Complete any practice today to start a streak.'}
-      </ThemedText>
+      {streakAtRisk ? (
+        <View style={[styles.riskBanner, { backgroundColor: tint('#F97316', 0.12), borderColor: tint('#F97316', 0.45) }]}>
+          <MaterialCommunityIcons name="fire-alert" size={28} color="#F97316" />
+          <View style={styles.flex}>
+            <ThemedText type="smallBold">
+              Your {streak.currentStreak}-day streak ends tonight
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              One quick practice keeps it going.
+            </ThemedText>
+          </View>
+          <Pressable
+            onPress={() =>
+              quickPractice
+                ? router.push(`/(app)/activities/${quickPractice.id}`)
+                : router.push('/(app)/(tabs)/activities')
+            }
+            style={({ pressed }) => [styles.riskButton, { opacity: pressed ? 0.8 : 1 }]}
+          >
+            <ThemedText type="smallBold" style={styles.riskButtonText}>
+              Practice
+            </ThemedText>
+          </Pressable>
+        </View>
+      ) : (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.streakHint}>
+          {streak.practicedToday
+            ? "Today's practice is done - see you tomorrow to keep the streak going!"
+            : 'Complete any practice today to start a streak.'}
+        </ThemedText>
+      )}
 
       {/* Quick start */}
       <SectionHeader title="Quick start" action="All modes" onAction={() => router.push('/(app)/(tabs)/practice')} />
@@ -255,6 +291,9 @@ const styles = StyleSheet.create({
   readinessLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   statsRow: { flexDirection: 'row', gap: Spacing.two },
   streakHint: { marginTop: -6, fontSize: 12 },
+  riskBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderRadius: 16, padding: 12 },
+  riskButton: { backgroundColor: '#F97316', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  riskButtonText: { color: '#ffffff' },
   quickRow: { flexDirection: 'row', gap: Spacing.two },
   quickItem: { flex: 1, alignItems: 'center', gap: 6, borderWidth: 1.5, borderRadius: 16, paddingVertical: 12 },
   quickLabel: { fontSize: 12, fontWeight: '700' },

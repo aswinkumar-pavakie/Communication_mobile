@@ -96,7 +96,13 @@ export default function RoleplaySessionScreen() {
     try {
       const reply = await sendRoleplayMessage(id, sessionId, userMessage.content);
       setMessages((prev) => [...prev, reply]);
+      // Keep the saved-conversations list current, so leaving and tapping Continue resumes here.
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
     } catch (err) {
+      // Nothing was saved (the backend stores both messages only on success) - take the
+      // bubble back out and return the text to the box so it can be resent.
+      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+      setDraft((current) => current || userMessage.content);
       setError(apiErrorMessage(err));
     } finally {
       setIsBusy(false);
@@ -116,7 +122,7 @@ export default function RoleplaySessionScreen() {
       });
       setPhase('completed');
       void queryClient.invalidateQueries({ queryKey: sessionsKey });
-      for (const key of ['dashboard', 'progress-overview', 'progress-history']) {
+      for (const key of ['dashboard', 'progress-overview', 'progress-history', 'streak-calendar']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
     } catch (err) {
@@ -177,7 +183,11 @@ export default function RoleplaySessionScreen() {
         </ThemedText>
       ) : null}
       {unfinished ? (
-        <Button label="Continue unfinished conversation" onPress={() => handleContinue(unfinished)} />
+        <Button
+          label="Continue unfinished conversation"
+          onPress={() => handleContinue(unfinished)}
+          disabled={sessionsQuery.isFetching}
+        />
       ) : null}
       <Button
         label={sessions.length > 0 ? 'Start a new conversation' : 'Start scenario'}
